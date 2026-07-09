@@ -1,2 +1,5 @@
 TTS==0.22.0
 requests==2.31.0
+transformers==4.40.2
+tokenizers==0.19.1
+numpy==1.26.4
