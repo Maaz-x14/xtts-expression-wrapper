@@ -1,0 +1,17 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Generated audio — do not commit
+output/*.wav
+
+# Reference clips are large binaries — download via scripts/download_ravdess.py
+reference_clips/*.wav
+
+# TTS model cache downloaded at runtime
+~/.local/share/tts/
+
+# Editor
+.DS_Store
+.vscode/
