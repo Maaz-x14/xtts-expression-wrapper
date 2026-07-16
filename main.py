@@ -1,14 +1,18 @@
 """
-Expressive TTS CLI — Level 1 Wrapper
+Expressive TTS CLI — Stage 2 Wrapper
 
-Usage:
-    python main.py "<happy>Hello, how are you?</happy>" --output happy_test.wav
-    python main.py "<sad>I miss you so much.</sad>" --output sad_test.wav
-    python main.py "<angry>This is unacceptable!</angry>" --output angry_test.wav
-    python main.py "<whisper>Can you keep a secret?</whisper>" --output whisper_test.wav
-    python main.py "<neutral>The meeting is at three PM.</neutral>" --output neutral_test.wav
+Supported outer tags  : <neutral> <happy> <sad> <angry> <whisper>
+Supported inline tags : <pause=Xms>  <break>  <silence>  <fast>...</fast>  <slow>...</slow>
 
-Supported tags: <neutral> <happy> <sad> <angry> <whisper>
+Usage examples:
+    python main.py "<happy>Hello, how are you today?</happy>"
+    python main.py "<sad>I miss you <pause=500ms> so much.</sad>"
+    python main.py "<angry>This is <pause=300ms> completely unacceptable!</angry>"
+    python main.py "<happy>Welcome <break> to the show <pause=200ms> everyone!</happy>"
+    python main.py "<neutral>Please <slow>take your time</slow> with this.</neutral>"
+    python main.py "<happy>Let me tell you <fast>this very quickly</fast> before I forget.</happy>"
+    python main.py "<sad>I wanted to say <pause=400ms> <slow>goodbye</slow>.</sad>"
+
 Output lands in: output/
 """
 
@@ -19,20 +23,20 @@ from src.wrapper import ExpressionWrapper
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Expressive TTS wrapper around XTTS-v2.",
+        description="Expressive TTS — Stage 2 wrapper with prosodic tags.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     parser.add_argument(
         "input",
         type=str,
-        help='Tagged input string. Example: "<happy>Hello world</happy>"',
+        help='Tagged input. Example: "<happy>Hello <pause=300ms> world!</happy>"',
     )
     parser.add_argument(
         "--output",
         type=str,
         default="output.wav",
-        help="Output filename inside output/ directory (default: output.wav)",
+        help="Output filename inside output/ (default: output.wav)",
     )
 
     args = parser.parse_args()
@@ -48,7 +52,7 @@ def main() -> None:
         print(f"\n[ERROR] {e}")
         sys.exit(1)
     except KeyboardInterrupt:
-        print("\n[ABORT] Interrupted by user.")
+        print("\n[ABORT] Interrupted.")
         sys.exit(0)
 
 
