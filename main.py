@@ -2,11 +2,11 @@
 Expressive TTS CLI — Level 1 Wrapper
 
 Usage:
-    python main.py "<happy>Hello, how are you?</happy>"
+    python main.py "<happy>Hello, how are you?</happy>" --output happy_test.wav
     python main.py "<sad>I miss you so much.</sad>" --output sad_test.wav
     python main.py "<angry>This is unacceptable!</angry>" --output angry_test.wav
-    python main.py "<whisper>Can you keep a secret?</whisper>"
-    python main.py "<neutral>The meeting is at three PM.</neutral>"
+    python main.py "<whisper>Can you keep a secret?</whisper>" --output whisper_test.wav
+    python main.py "<neutral>The meeting is at three PM.</neutral>" --output neutral_test.wav
 
 Supported tags: <neutral> <happy> <sad> <angry> <whisper>
 Output lands in: output/
