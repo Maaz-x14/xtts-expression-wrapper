@@ -18,9 +18,12 @@ echo "[SETUP] Upgrading pip..."
 pip install --upgrade pip --quiet
 
 echo "[SETUP] Installing PyTorch CPU (this may take a few minutes)..."
-pip install torch==2.1.2 torchaudio==2.1.2 \
+pip install torch==2.4.1 torchaudio==2.4.1 \
     --index-url https://download.pytorch.org/whl/cpu \
     --quiet
+
+echo "[SETUP] Pinning transformers (BeamSearchScorer removed in 4.41+)..."
+pip install "transformers==4.40.3" --quiet
 
 echo "[SETUP] Installing project requirements..."
 pip install -r requirements.txt --quiet
