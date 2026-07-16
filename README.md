@@ -23,13 +23,13 @@ No model weights modified. English testing only at this stage.
 
 ## Supported Tags
 
-| Tag | Reference Source | RAVDESS Code |
-|---|---|---|
-| `<neutral>` | neutral, normal intensity | `01-01` |
-| `<happy>` | happy, strong intensity | `03-02` |
-| `<sad>` | sad, strong intensity | `04-02` |
-| `<angry>` | angry, strong intensity | `05-02` |
-| `<whisper>` | calm (proxy), normal intensity | `02-01` |
+| Tag           | Reference Source               | RAVDESS Code |
+| ------------- | ------------------------------ | ------------ |
+| `<neutral>` | neutral, normal intensity      | `01-01`    |
+| `<happy>`   | happy, strong intensity        | `03-02`    |
+| `<sad>`     | sad, strong intensity          | `04-02`    |
+| `<angry>`   | angry, strong intensity        | `05-02`    |
+| `<whisper>` | calm (proxy), normal intensity | `02-01`    |
 
 ---
 
@@ -37,7 +37,7 @@ No model weights modified. English testing only at this stage.
 
 ```bash
 # 1. Clone
-git clone https://github.com/YOUR_USERNAME/xtts-expression-wrapper.git
+git clone https://github.com/Maaz-x14/xtts-expression-wrapper.git
 cd xtts-expression-wrapper
 
 # 2. Run setup (installs Python 3.11, venv, torch CPU, TTS)
@@ -104,6 +104,7 @@ xtts-expression-wrapper/
 ## Dataset Credit
 
 Reference clips sourced from **RAVDESS**:
+
 > Livingstone SR, Russo FA (2018) The Ryerson Audio-Visual Database of Emotional Speech and Song (RAVDESS).
 > *PLOS ONE* 13(5): e0196391. https://doi.org/10.1371/journal.pone.0196391
 > License: CC BY-NC-SA 4.0
