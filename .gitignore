@@ -15,3 +15,5 @@ reference_clips/*.wav
 # Editor
 .DS_Store
 .vscode/
+/output
+/reference_clips
