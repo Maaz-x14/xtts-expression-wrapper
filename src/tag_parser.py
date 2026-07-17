@@ -1,6 +1,11 @@
 import re
 
-SUPPORTED_EMOTION_TAGS = {"neutral", "happy", "sad", "angry", "whisper"}
+from src.reference_map import EMOTION_TO_CLIP, EMOTION_ALIASES
+
+# Outer tags a user is allowed to write. Base emotions (have a clip) +
+# sub-emotion aliases (resolved to a base emotion's clip in reference_map.py).
+# Built from reference_map.py so this file never drifts out of sync with it.
+SUPPORTED_EMOTION_TAGS = set(EMOTION_TO_CLIP.keys()) | set(EMOTION_ALIASES.keys())
 
 PAUSE_DEFAULTS_MS = {
     "break":   500,
@@ -23,6 +28,8 @@ def _parse_emotion_tag(text: str) -> tuple[str, str]:
     Extract outer emotion tag and inner content.
     Returns (emotion, inner_content).
     Falls back to neutral if tag missing or unsupported.
+    Note: emotion returned here may be an alias (e.g. "joy") — resolution to
+    a base emotion happens downstream in reference_map.get_reference_path().
     """
     match = re.match(r'^<(\w+)>(.*)</\1>$', text.strip(), re.DOTALL)
 
@@ -105,11 +112,14 @@ def parse_input(text: str) -> tuple[str, list[dict]]:
     Full parse of a tagged input string.
 
     Returns:
-        emotion  : str        — one of SUPPORTED_EMOTION_TAGS
+        emotion  : str        — a SUPPORTED_EMOTION_TAGS member (base or alias);
+                                 caller must resolve aliases via reference_map
+                                 before using this as a lookup key elsewhere.
         segments : list[dict] — ordered list of text/pause segments
 
     Supported format:
         <happy>Hello <pause=300ms> how are <fast>you</fast> today?</happy>
+        <joy>Aliases work too, e.g. joy resolves to happy's clip.</joy>
     """
     emotion, inner = _parse_emotion_tag(text)
     segments = _parse_segments(inner)
