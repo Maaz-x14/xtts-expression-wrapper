@@ -4,14 +4,20 @@ Download RAVDESS speech dataset and extract one reference clip per emotion.
 RAVDESS filename format: 03-01-{emotion}-{intensity}-{statement}-{rep}-{actor}.wav
   Modality  : 03 = audio-only
   Channel   : 01 = speech
-  Emotion   : 01=neutral 02=calm 03=happy 04=sad 05=angry
+  Emotion   : 01=neutral 02=calm 03=happy 04=sad 05=angry 06=fearful 07=disgust 08=surprised
   Intensity : 01=normal 02=strong (neutral has no strong variant)
   Statement : 01="Kids are talking by the door"
   Rep       : 01 or 02
   Actor     : 01–24
 
-We pick Actor 01, Statement 01, Rep 01 for all clips.
-Calm is used as the whisper proxy — closest available in RAVDESS.
+We pick Actor 01, Statement 01, Rep 01 for all clips. Every actor performs
+all 60 trials (7 emotions x 2 intensities, minus neutral's missing strong,
+plus calm x2 and neutral x1 = 60), so Actor 01/Statement 01/Rep 01 exists
+for every emotion below — no fallback logic needed.
+
+'whisper' is kept as a separate manually-provided clip (not RAVDESS-derived,
+perceptually distinct from calm — hushed/breathy vs. relaxed/slow) and is
+NOT touched by this script.
 
 Source: https://zenodo.org/record/1188976
 License: CC BY-NC-SA 4.0
@@ -31,13 +37,17 @@ ZENODO_URL = (
 
 OUTPUT_DIR = Path(__file__).parent.parent / "reference_clips"
 
-# Maps our emotion label → exact RAVDESS filename we want
+# Maps our emotion label -> exact RAVDESS filename we want
 TARGET_FILES: dict[str, str] = {
-    "neutral": "03-01-01-01-01-01-01.wav",  # neutral, normal intensity
-    "happy":   "03-01-03-02-01-01-01.wav",  # happy, strong intensity
-    "sad":     "03-01-04-02-01-01-01.wav",  # sad, strong intensity
-    "angry":   "03-01-05-02-01-01-01.wav",  # angry, strong intensity
-    "whisper": "03-01-02-01-01-01-01.wav",  # calm as whisper proxy, normal intensity
+    "neutral":   "03-01-01-01-01-01-01.wav",  # neutral, normal intensity (only option)
+    "calm":      "03-01-02-02-01-01-01.wav",  # calm, strong intensity
+    "happy":     "03-01-03-02-01-01-01.wav",  # happy, strong intensity
+    "sad":       "03-01-04-02-01-01-01.wav",  # sad, strong intensity
+    "angry":     "03-01-05-02-01-01-01.wav",  # angry, strong intensity
+    "fearful":   "03-01-06-02-01-01-01.wav",  # fearful, strong intensity
+    "disgust":   "03-01-07-02-01-01-01.wav",  # disgust, strong intensity
+    "surprised": "03-01-08-02-01-01-01.wav",  # surprised, strong intensity
+    # NOTE: "whisper" is intentionally excluded — separate manual clip, not RAVDESS.
 }
 
 
@@ -67,11 +77,11 @@ def download_zip(url: str) -> bytes:
 def extract_clips(zip_data: bytes) -> None:
     OUTPUT_DIR.mkdir(exist_ok=True)
 
-    # Build reverse lookup: ravdess_filename → our emotion label
+    # Build reverse lookup: ravdess_filename -> our emotion label
     filename_to_emotion = {v: k for k, v in TARGET_FILES.items()}
 
     print("[EXTRACT] Scanning zip contents...")
-    found: dict[str, str] = {}  # emotion → zip internal path
+    found: dict[str, str] = {}  # emotion -> zip internal path
 
     with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
         for name in zf.namelist():
@@ -88,14 +98,15 @@ def extract_clips(zip_data: bytes) -> None:
             out_path = OUTPUT_DIR / f"{emotion}.wav"
             with zf.open(zip_path) as src:
                 out_path.write_bytes(src.read())
-            print(f"[EXTRACT] {emotion:8s} ← {Path(zip_path).name}  →  {out_path}")
+            print(f"[EXTRACT] {emotion:10s} <- {Path(zip_path).name}  ->  {out_path}")
 
     missing = set(TARGET_FILES.keys()) - set(found.keys())
     if missing:
         print(f"[WARN] Could not locate clips for: {sorted(missing)}")
         print("[WARN] These emotions will fall back to neutral at runtime.")
     else:
-        print("[DONE] All 5 reference clips extracted successfully.")
+        print(f"[DONE] All {len(TARGET_FILES)} reference clips extracted successfully.")
+        print("[INFO] 'whisper.wav' is untouched — manage that clip manually.")
 
 
 def main() -> None:
