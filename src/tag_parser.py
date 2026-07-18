@@ -1,11 +1,11 @@
 import re
 
-from src.reference_map import EMOTION_TO_CLIP, EMOTION_ALIASES
+from src.reference_map import ALL_BASE_EMOTIONS, EMOTION_ALIASES
 
-# Outer tags a user is allowed to write. Base emotions (have a clip) +
+# Outer tags a user is allowed to write. Base emotions (have clip(s)) +
 # sub-emotion aliases (resolved to a base emotion's clip in reference_map.py).
 # Built from reference_map.py so this file never drifts out of sync with it.
-SUPPORTED_EMOTION_TAGS = set(EMOTION_TO_CLIP.keys()) | set(EMOTION_ALIASES.keys())
+SUPPORTED_EMOTION_TAGS = ALL_BASE_EMOTIONS | set(EMOTION_ALIASES.keys())
 
 PAUSE_DEFAULTS_MS = {
     "break":   500,
@@ -55,16 +55,6 @@ def _parse_segments(inner: str) -> list[dict]:
     Segment types:
       {"type": "text",  "content": str, "speed": float}
       {"type": "pause", "duration_ms": int}
-
-    Example:
-      input  → 'Hello <pause=300ms> how are <fast>you</fast> today?'
-      output → [
-          {"type": "text",  "content": "Hello",   "speed": 1.0},
-          {"type": "pause", "duration_ms": 300},
-          {"type": "text",  "content": "how are", "speed": 1.0},
-          {"type": "text",  "content": "you",     "speed": 1.5},
-          {"type": "text",  "content": "today?",  "speed": 1.0},
-      ]
     """
     segments = []
     cursor = 0
@@ -116,10 +106,6 @@ def parse_input(text: str) -> tuple[str, list[dict]]:
                                  caller must resolve aliases via reference_map
                                  before using this as a lookup key elsewhere.
         segments : list[dict] — ordered list of text/pause segments
-
-    Supported format:
-        <happy>Hello <pause=300ms> how are <fast>you</fast> today?</happy>
-        <joy>Aliases work too, e.g. joy resolves to happy's clip.</joy>
     """
     emotion, inner = _parse_emotion_tag(text)
     segments = _parse_segments(inner)
