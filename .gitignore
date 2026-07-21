@@ -17,3 +17,6 @@ reference_clips/*.wav
 .vscode/
 /output
 /reference_clips
+/SEMOUR+
+/UrduSER
+/Agri-TTS
