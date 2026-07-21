@@ -1,19 +1,25 @@
 """
-Expressive TTS CLI — Stage 2 Wrapper
+Expressive Urdu TTS CLI — XTTS v2 fine-tune + Auralis backend
 
-Supported outer tags  : <neutral> <happy> <sad> <angry> <whisper>
-Supported inline tags : <pause=Xms>  <break>  <silence>  <fast>...</fast>  <slow>...</slow>
+Model    : Agri-TTS/ (local fine-tuned checkpoint)
+Language : Urdu (ur)
+Backend  : Auralis (latent-cached, multi-clip conditioning)
 
-Usage examples:
-    python main.py "<happy>Hello, how are you today?</happy>"
-    python main.py "<sad>I miss you <pause=500ms> so much.</sad>"
-    python main.py "<angry>This is <pause=300ms> completely unacceptable!</angry>"
-    python main.py "<happy>Welcome <break> to the show <pause=200ms> everyone!</happy>"
-    python main.py "<neutral>Please <slow>take your time</slow> with this.</neutral>"
-    python main.py "<happy>Let me tell you <fast>this very quickly</fast> before I forget.</happy>"
-    python main.py "<sad>I wanted to say <pause=400ms> <slow>goodbye</slow>.</sad>"
+Environment:
+    XTTS_MODEL_DIR   path to checkpoint dir (default: ./Agri-TTS)
 
-Output lands in: output/
+Usage examples (Urdu):
+    python main.py "<happy>السلام علیکم، آپ کیسے ہیں؟</happy>"
+    python main.py "<sad>مجھے آپ کی یاد آتی ہے <pause=500ms> بہت زیادہ۔</sad>"
+    python main.py "<angry>یہ بالکل <pause=300ms> ناقابل قبول ہے!</angry>"
+    python main.py "<neutral>براہ کرم <slow>آہستہ آہستہ</slow> بولیں۔</neutral>"
+    python main.py "<happy>سنیں <fast>یہ بات جلدی سے</fast> بتاتا ہوں۔</happy>"
+
+Usage examples (Roman Urdu — works too):
+    python main.py "<happy>Salam, aap kaise hain?</happy>"
+    python main.py "<sad>Mujhe aap ki yaad aati hai <pause=500ms> bohat zyada.</sad>"
+
+Output: output/
 """
 
 import argparse
@@ -23,14 +29,14 @@ from src.wrapper import ExpressionWrapper
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Expressive TTS — Stage 2 wrapper with prosodic tags.",
+        description="Expressive Urdu TTS — XTTS v2 fine-tune + Auralis.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     parser.add_argument(
         "input",
         type=str,
-        help='Tagged input. Example: "<happy>Hello <pause=300ms> world!</happy>"',
+        help='Tagged input. Example: "<happy>السلام علیکم</happy>"',
     )
     parser.add_argument(
         "--output",
@@ -38,11 +44,16 @@ def main() -> None:
         default="output.wav",
         help="Output filename inside output/ (default: output.wav)",
     )
+    parser.add_argument(
+        "--single-clip",
+        action="store_true",
+        help="Use single reference clip instead of multi-clip conditioning",
+    )
 
     args = parser.parse_args()
 
     try:
-        wrapper = ExpressionWrapper()
+        wrapper = ExpressionWrapper(use_multi_clip=not args.single_clip)
         output_path = wrapper.synthesize(args.input, args.output)
         print(f"\n[DONE] Audio saved: {output_path}")
     except FileNotFoundError as e:
