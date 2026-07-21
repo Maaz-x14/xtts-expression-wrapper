@@ -1,3 +1,25 @@
+"""
+reference_map.py — Emotion → reference audio clip routing.
+
+Clip structure on disk:
+  reference_clips/
+    neutral.wav          ← single clip (flat)
+    whisper.wav          ← single clip (flat)
+    happy/               ← multi-clip emotions (subfoldered)
+      s01_r01.wav
+      s01_r02.wav
+      s02_r01.wav
+      s02_r02.wav
+    angry/ ...
+    sad/   ...
+    (etc.)
+
+Source for Urdu emotion clips: SEMOUR+ (27,640 utterances, 8 emotions, 24 speakers).
+Pick 2–4 clips per emotion from the same speaker for consistent conditioning.
+RAVDESS English clips can still be used as a temporary cross-lingual placeholder
+until Urdu clips are sourced — quality will be lower but the pipeline runs.
+"""
+
 from pathlib import Path
 
 REFERENCE_DIR = Path(__file__).parent.parent / "reference_clips"
@@ -9,49 +31,45 @@ MULTI_CLIP_EMOTIONS = {
     "calm", "happy", "sad", "angry", "fearful", "disgust", "surprised",
 }
 
-# Emotions with exactly one clip, flat in reference_clips/ (no subfolder,
-# nothing to select between).
+# Emotions with exactly one clip, flat in reference_clips/
 SINGLE_CLIP_EMOTIONS: dict[str, Path] = {
     "neutral": REFERENCE_DIR / "neutral.wav",
-    "whisper": REFERENCE_DIR / "whisper.wav",  # manual clip, not RAVDESS
+    "whisper": REFERENCE_DIR / "whisper.wav",
 }
 
-# All available clip_ids for multi-clip emotions (2 statements x 2 reps).
+# Clip IDs available per multi-clip emotion (2 statements × 2 reps — matches RAVDESS
+# and SEMOUR+ naming convention used in download scripts).
 AVAILABLE_CLIP_IDS = [f"s{s}_r{r}" for s in ("01", "02") for r in ("01", "02")]
 
-# Sub-emotion tag -> closest base emotion. No clip of their own; resolved via
-# _resolve_alias() before lookup. Speculative mapping (Step 2 listening pass
-# validated base emotions only, not these aliases).
+# Sub-emotion aliases → base emotion
 EMOTION_ALIASES: dict[str, str] = {
+    # Happiness family
     "joy": "happy", "excitement": "happy", "contentment": "happy",
+    # Sadness family
     "grief": "sad", "loneliness": "sad", "disappointment": "sad",
+    # Anger family
     "rage": "angry", "frustration": "angry", "irritation": "angry",
+    # Fear family
     "anxiety": "fearful", "nervousness": "fearful", "panic": "fearful",
+    # Disgust family
     "contempt": "disgust", "revulsion": "disgust", "disdain": "disgust",
+    # Surprise family
     "shock": "surprised", "amazement": "surprised", "disbelief": "surprised",
+    # Calm family
     "serenity": "calm", "relaxation": "calm",
 }
 
-# Union of every base emotion (multi- or single-clip), used by tag_parser.py
-# to build SUPPORTED_EMOTION_TAGS.
 ALL_BASE_EMOTIONS = MULTI_CLIP_EMOTIONS | set(SINGLE_CLIP_EMOTIONS.keys())
 
 
 def _resolve_alias(emotion: str) -> str:
-    """Resolve a sub-emotion alias to its base emotion. No-op if already base."""
     return EMOTION_ALIASES.get(emotion, emotion)
 
 
 def get_reference_path(emotion: str, clip_id: str | None = None) -> Path:
     """
-    Return the Path to the reference wav for the given emotion.
-
-    Args:
-        emotion : base emotion or sub-emotion alias (resolved automatically)
-        clip_id : which of the 4 clips to use for multi-clip emotions, e.g.
-                  "s01_r02". Defaults to DEFAULT_CLIP_ID ("s01_r01"), which
-                  matches prior single-clip behavior exactly. Ignored for
-                  single-clip emotions (neutral, whisper).
+    Return the Path to the reference wav for the given emotion (single clip).
+    For multi-clip conditioning use list_clips() instead.
 
     Falls back to neutral if the emotion/clip combination doesn't exist.
     """
@@ -67,7 +85,7 @@ def get_reference_path(emotion: str, clip_id: str | None = None) -> Path:
         resolved_clip_id = clip_id or DEFAULT_CLIP_ID
         if resolved_clip_id not in AVAILABLE_CLIP_IDS:
             print(f"[REFMAP] Unknown clip_id '{resolved_clip_id}' for '{emotion}'. "
-                  f"Available: {AVAILABLE_CLIP_IDS}. Falling back to {DEFAULT_CLIP_ID}.")
+                  f"Falling back to {DEFAULT_CLIP_ID}.")
             resolved_clip_id = DEFAULT_CLIP_ID
         path = REFERENCE_DIR / emotion / f"{resolved_clip_id}.wav"
         if not path.exists():
@@ -83,16 +101,16 @@ def _fallback_to_neutral(reason: str) -> Path:
     if not fallback.exists():
         raise FileNotFoundError(
             f"Neutral fallback clip not found at {fallback}. "
-            f"Run: python scripts/download_ravdess.py"
+            f"Add a neutral Urdu reference clip from SEMOUR+."
         )
     return fallback
 
 
 def list_clips(emotion: str) -> list[Path]:
     """
-    Return all available clip Paths for a given base emotion (aliases resolved).
+    Return all available clip Paths for a given emotion (aliases resolved).
+    Used by wrapper.py for multi-clip latent conditioning.
     Single-clip emotions return a 1-item list. Missing files are excluded.
-    Useful for A/B testing across clip_ids.
     """
     emotion = _resolve_alias(emotion)
 
@@ -109,10 +127,8 @@ def list_clips(emotion: str) -> list[Path]:
 
 def verify_all_clips() -> dict[str, bool]:
     """
-    Check which BASE emotion clips are present on disk.
-    For multi-clip emotions, True only if ALL 4 clips exist (strict check --
-    partial downloads should be visible, not silently masked).
-    Aliases aren't checked -- they resolve to a base emotion's clip(s).
+    Check which base emotion clips exist on disk.
+    For multi-clip emotions: True only if ALL 4 clips present (strict).
     """
     status: dict[str, bool] = {}
 
