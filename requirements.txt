@@ -1,6 +1,18 @@
-TTS==0.22.0
-requests==2.31.0
-transformers==4.40.2
-tokenizers==0.19.1
-numpy==1.26.4
+# Core TTS backend — Auralis replaces TTS.api (Coqui high-level API)
+auralis>=0.1.0
+
+# Audio processing
 soundfile>=0.12.0
+librosa>=0.10.0
+numpy==1.26.4
+
+# ML / torch — match your local CUDA version if on GPU
+torch>=2.1.0
+torchaudio>=2.1.0
+
+# Transformers (needed by Auralis internals)
+transformers>=4.40.0
+tokenizers>=0.19.0
+
+# Utilities
+requests>=2.31.0
