@@ -7,7 +7,7 @@ Auralis dropped — incompatible with Coqui trainer checkpoint format (needs saf
 Latent caching: tts_model.get_conditioning_latents() is called once per emotion at
 startup. (gpt_cond_latent, speaker_embedding) tensors are stored in self._cache.
 Synthesis calls inference() directly with precomputed tensors — zero re-encoding
-per request.
+per request.E
 
 Text chunking: handled manually — split on sentence boundaries before passing to
 inference(), since XTTS GPT context is ~250 chars.
@@ -132,11 +132,18 @@ class ExpressionWrapper:
 
             t0 = time.time()
             try:
+                # gpt_cond_latent, speaker_embedding = self.model.get_conditioning_latents(
+                #     audio_path=[str(ref_path)],
+                #     gpt_cond_len=self.model.config.gpt_cond_len,
+                #     gpt_cond_chunk_len=self.model.config.gpt_cond_chunk_len,
+                #     max_ref_length=self.model.config.max_ref_len,
+                #     sound_norm_refs=self.model.config.sound_norm_refs,
+                # )
                 gpt_cond_latent, speaker_embedding = self.model.get_conditioning_latents(
                     audio_path=[str(ref_path)],
                     gpt_cond_len=self.model.config.gpt_cond_len,
-                    gpt_cond_chunk_len=self.model.config.gpt_cond_chunk_len,
-                    max_ref_length=self.model.config.max_ref_len,
+                    gpt_cond_chunk_len=6,      # was: self.model.config.gpt_cond_chunk_len (4)
+                    max_ref_length=10,         # was: self.model.config.max_ref_len (30)
                     sound_norm_refs=self.model.config.sound_norm_refs,
                 )
                 self._cache[emotion] = (gpt_cond_latent, speaker_embedding)
