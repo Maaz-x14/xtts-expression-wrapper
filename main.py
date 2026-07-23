@@ -1,5 +1,5 @@
 """
-Expressive Urdu TTS CLI — XTTS v2 fine-tune + Auralis backend
+Expressive Urdu TTS — XTTS v2 fine-tune + Auralis backend
 
 Model    : Agri-TTS/ (local fine-tuned checkpoint)
 Language : Urdu
