@@ -1,48 +1,57 @@
-# XTTS Expression Wrapper — Phase 1
+# XTTS Expression Wrapper — Phase 2
 
-Proof-of-concept wrapper around XTTS-v2 that adds expression tags via reference audio swapping.
-No model weights modified. English testing only at this stage.
+Expressive Urdu TTS pipeline built on a locally fine-tuned XTTS v2 checkpoint (`Agri-TTS/`),
+served via Auralis with precomputed latent caching and SEMOUR+ Urdu reference clips.
 
 ---
 
 ## Architecture
 
 ```
-<happy>Hello world</happy>
+<happy>آپ کیسے ہیں؟</happy>
          ↓
-    tag_parser.py        → ("happy", "Hello world")
+    tag_parser.py        → ("happy", "آپ کیسے ہیں؟")
          ↓
-    reference_map.py     → reference_clips/happy.wav
+    reference_map.py     → reference_clips/happy/ref.wav   (SEMOUR+ composite, ~6s)
          ↓
-    XTTS-v2 inference    → tts_to_file(text, speaker_wav=happy.wav, language="en")
+    latent cache         → gpt_cond_latent + speaker_embedding  (precomputed at startup)
+         ↓
+    Auralis / XTTS v2    → TTSRequest(text, language="ur", latents=cached)
          ↓
     output/output.wav
 ```
+
+### Key design decisions
+
+- **Reference clips**: 4 longest SEMOUR+ clips per emotion, concatenated into one composite
+  `ref.wav` per emotion. Concatenation happens once at prep time, not at inference time.
+- **Latent cache**: `gpt_cond_latent` and `speaker_embedding` computed from `ref.wav` at
+  server startup. Zero re-encoding per synthesis request.
+- **Text chunking**: Auralis splits long input at sentence boundaries, handling XTTS's
+  ~250-char GPT context limit transparently.
+- **Single actor**: All reference clips sourced from one SEMOUR+ actor for consistent
+  voice identity across all emotions.
 
 ---
 
 ## Supported Tags
 
-### Base emotions (8, direct RAVDESS clip + whisper)
+### Base emotions (8)
 
-| Tag             | Reference Source            | RAVDESS Code |
-| --------------- | --------------------------- | ------------ |
-| `<neutral>`   | neutral, normal intensity   | `01-01`    |
-| `<calm>`      | calm, strong intensity      | `02-02`    |
-| `<happy>`     | happy, strong intensity     | `03-02`    |
-| `<sad>`       | sad, strong intensity       | `04-02`    |
-| `<angry>`     | angry, strong intensity     | `05-02`    |
-| `<fearful>`   | fearful, strong intensity   | `06-02`    |
-| `<disgust>`   | disgust, strong intensity   | `07-02`    |
-| `<surprised>` | surprised, strong intensity | `08-02`    |
-| `<whisper>`   | manual clip (not RAVDESS)   | —           |
+| Tag             | SEMOUR+ Source | Notes                                     |
+| --------------- | -------------- | ----------------------------------------- |
+| `<neutral>`   | Neutral/       | Also written as neutral.wav flat fallback |
+| `<calm>`      | Boredom/       | Closest low-arousal proxy in SEMOUR+      |
+| `<happy>`     | Happiness/     |                                           |
+| `<sad>`       | Sadness/       |                                           |
+| `<angry>`     | Anger/         |                                           |
+| `<fearful>`   | Fearful/       |                                           |
+| `<disgust>`   | Disgust/       |                                           |
+| `<surprised>` | Surprise/      |                                           |
 
-### Sub-emotion aliases (20, resolve to nearest base emotion above)
+### Sub-emotion aliases (resolve to nearest base emotion)
 
-No clip of their own — routed to a base emotion's reference clip in `reference_map.py`.
-**Unvalidated by listening tests** (that's Step 2 of the roadmap, not done yet).
-
-| Alias tag                                     | Resolves to   |
+| Alias                                         | Resolves to   |
 | --------------------------------------------- | ------------- |
 | `joy`, `excitement`, `contentment`      | `happy`     |
 | `grief`, `loneliness`, `disappointment` | `sad`       |
@@ -50,7 +59,8 @@ No clip of their own — routed to a base emotion's reference clip in `reference
 | `anxiety`, `nervousness`, `panic`       | `fearful`   |
 | `contempt`, `revulsion`, `disdain`      | `disgust`   |
 | `shock`, `amazement`, `disbelief`       | `surprised` |
-| `serenity`, `relaxation`                  | `calm`      |
+| `serenity`, `relaxation`, `boredom`     | `calm`      |
+| `whisper`                                   | `neutral`   |
 
 ### Inline prosodic tags
 
@@ -64,54 +74,69 @@ No clip of their own — routed to a base emotion's reference clip in `reference
 
 ---
 
-## Local Setup (Ubuntu 24.04, CPU)
+## Setup
+
+### Prerequisites
+
+- Python 3.10+
+- `Agri-TTS/` checkpoint directory (contains `config.json`, `model.pth`, `vocab.json`)
+- `SEMOUR+_data/` dataset directory
+
+### Install
 
 ```bash
-# 1. Clone
 git clone https://github.com/Maaz-x14/xtts-expression-wrapper.git
 cd xtts-expression-wrapper
 
-# 2. Run setup (installs Python 3.11, venv, torch CPU, TTS)
-chmod +x setup.sh
-./setup.sh
-
-# 3. Activate venv
-source venv/bin/activate
-
-# 4. Download RAVDESS reference clips (~199MB, one-time)
-python scripts/download_ravdess.py
-
-# 5. Run
-python main.py "<happy>Hello, how are you today?</happy>"
-
-# 5b. Run with explicit output path
-python main.py "<happy>Hello, how are you today?</happy>" --output custom_name.wav
-python main.py "<happy>Hello, how are you today?</happy>" --output /full/path/to/file.wav
+pip install -r requirements.txt
 ```
 
-**Note**: CPU inference takes 30–90 seconds per sentence. Use Kaggle for GPU speed.
+### Prepare reference clips (one-time)
 
-> ⚠️ The `--output` flag above assumes `main.py` exposes an `--output`/`-o` argument
-> that is passed through to `ExpressionWrapper.synthesize(output_filename=...)`.
-> Confirm this is wired up in `main.py` before relying on it — the wrapper method
-> itself already accepts a filename, but the CLI layer needs to forward it.
+```bash
+# Audit candidate actors — listen to audition/ and pick
+python scripts/select_clips.py --semour-dir SEMOUR+_data --audit
+
+# Build reference_clips/ from chosen actor (Actor 5 recommended)
+python scripts/select_clips.py --semour-dir SEMOUR+_data --build --actor 5
+```
+
+### Set model path (if Agri-TTS/ is not in repo root)
+
+1. ```bash
+   export XTTS_MODEL_DIR=/path/to/Agri-TTS
+   ```
+
+### Run
+
+1. ```bash
+   python main.py "<happy>السلام علیکم، آپ کیسے ہیں؟</happy>"
+   python main.py "<sad>مجھے آپ کی یاد آتی ہے <pause=500ms> بہت زیادہ۔</sad>"
+   python main.py "<angry>یہ بالکل <pause=300ms> ناقابل قبول ہے!</angry>" --output angry_test.wav
+   python main.py "<neutral>براہ کرم <slow>آہستہ آہستہ</slow> بولیں۔</neutral>"
+
+   # Force single-clip mode (skip composite, use first clip only)
+   python main.py "<happy>السلام علیکم</happy>" --single-clip
+   ```
+
+**Note**: CPU inference is slow (~30–90s per sentence). Use Kaggle/Colab for GPU.
 
 ---
 
-## Kaggle Setup (GPU — recommended for inference)
+## Kaggle / Colab Setup (GPU)
 
 ```python
-# In a Kaggle notebook cell:
-!git clone https://github.com/YOUR_USERNAME/xtts-expression-wrapper.git
+!git clone https://github.com/Maaz-x14/xtts-expression-wrapper.git
 %cd xtts-expression-wrapper
-!pip install TTS==0.22.0 -q
-!pip install requests -q
-!python scripts/download_ravdess.py
-!python main.py "<happy>Hello, how are you today?</happy>" --output /kaggle/working/output.wav
-```
+!pip install -r requirements.txt -q
 
-Kaggle T4 GPU reduces inference to ~3–5 seconds per sentence.
-Use `--output /kaggle/working/...` so generated audio lands in Kaggle's persisted output directory instead of the ephemeral working copy.
+# Upload Agri-TTS/ checkpoint and reference_clips/ (pre-built) to Kaggle dataset
+# Then set the path:
+import os
+os.environ["XTTS_MODEL_DIR"] = "/kaggle/input/agri-tts/Agri-TTS"
+
+!python main.py "<happy>السلام علیکم</happy>" --output /kaggle/working/output.wav
+```
 
 ---
 
@@ -119,52 +144,73 @@ Use `--output /kaggle/working/...` so generated audio lands in Kaggle's persiste
 
 ```
 xtts-expression-wrapper/
-├── reference_clips/         # RAVDESS clips (not committed, download via script)
-│   ├── neutral.wav
-│   ├── calm.wav
-│   ├── happy.wav
-│   ├── sad.wav
-│   ├── angry.wav
-│   ├── fearful.wav
-│   ├── disgust.wav
-│   ├── surprised.wav
-│   └── whisper.wav          # manual, not from download script
-├── output/                  # Generated audio (not committed)
+├── Agri-TTS/                    # Fine-tuned XTTS v2 checkpoint (not committed)
+│   ├── config.json
+│   ├── model.pth
+│   └── vocab.json
+├── reference_clips/             # SEMOUR+ composites (not committed, built via script)
+│   ├── neutral.wav              # flat fallback copy
+│   ├── angry/ref.wav
+│   ├── calm/ref.wav
+│   ├── disgust/ref.wav
+│   ├── fearful/ref.wav
+│   ├── happy/ref.wav
+│   ├── neutral/ref.wav
+│   ├── sad/ref.wav
+│   └── surprised/ref.wav
+├── output/                      # Generated audio (not committed)
 ├── src/
-│   ├── tag_parser.py        # <happy>text</happy> → ("happy", "text"); also handles aliases
-│   ├── reference_map.py     # emotion (base or alias) → wav path
-│   └── wrapper.py           # XTTS-v2 inference orchestration
+│   ├── tag_parser.py            # Tag parsing — unchanged from Phase 1
+│   ├── reference_map.py         # emotion → reference_clips/<emotion>/ref.wav
+│   └── wrapper.py               # Auralis inference + latent cache
 ├── scripts/
-│   └── download_ravdess.py  # One-time RAVDESS download (8 base emotions)
-├── main.py                  # CLI entrypoint
+│   ├── select_clips.py          # SEMOUR+ clip selection and composite builder
+│   └── download_ravdess.py      # Phase 1 only — not used in Phase 2
+├── main.py
 ├── requirements.txt
-├── setup.sh
-└── .gitignore
+└── setup.sh
 ```
 
 ---
 
-## Roadmap status
+## Roadmap
 
 ```
-Stage 1 ✅ — Level 1 wrapper (emotion via reference swap)
-Stage 2 ✅ — Prosodic inline tags (pause, break, silence, fast, slow)
-Stage 3 (in progress) — Emotion expansion
-  ✅ Step 1 — Tier 1 emotions added (8 RAVDESS base + 20 sub-emotion aliases)
-  ⬜ Step 2 — Subjective evaluation (listen + score all 8 base emotions)
-  ⬜ Step 3 — Tier 2 emotions (EmoV-DB) — conditional on Step 2 results
-  ⬜ Step 4 — Phase 2 measurement before Level 3
-Stage 4 — Phase 2 measurement / evaluation
-Stage 5 — Level 3: Latent mixing (intercept Perceiver, blend α)
-Stage 6 — Urdu adaptation (fine-tuned Urdu XTTS-v2 + SEMOUR+)
+Phase 1 (English baseline)
+  ✅ Level 1 wrapper — emotion via reference-clip swap (Coqui TTS.api)
+  ✅ Prosodic inline tags — pause, break, silence, fast, slow
+  ✅ RAVDESS 8-emotion clip set
+  ✅ Subjective evaluation — distinctiveness strong (~4.6), convincingness weak (~2.8)
+  ✅ Multi-clip A/B test — improved most emotions; angry/disgust ceiling remained
+  ✅ Root cause confirmed — Perceiver entangles speaker+prosody (architectural ceiling)
+
+Phase 2 (Urdu production)
+  ✅ Backend swap — Coqui TTS.api → Auralis (latent caching, chunking, concurrency)
+  ✅ Model swap — base XTTS v2 → Agri-TTS (Urdu fine-tune, language="ur")
+  ✅ Reference clips — RAVDESS (English) → SEMOUR+ (Urdu, Actor 5)
+  ✅ Clip strategy — concatenated composites (~6s) replacing single clips
+  ⬜ First synthesis test on Urdu input
+  ⬜ Subjective evaluation — repeat Phase 1 scoring on Urdu output
+  ⬜ Temperature sweep on weak emotions (angry, disgust)
+
+Phase 3 (planned)
+  ⬜ Level 3 — Latent mixing (intercept Perceiver, blend α between emotion latents)
+  ⬜ REST API wrapper (FastAPI, Auralis async backend)
+  ⬜ Integration with M2M100 transliteration pipeline
+       User Speech → STT → Urdu Text → M2M100 → XTTS TTS → Audio
 ```
 
 ---
 
-## Dataset Credit
+## Dataset Credits
 
-Reference clips sourced from **RAVDESS**:
+**SEMOUR+** (reference clips):
 
-> Livingstone SR, Russo FA (2018) The Ryerson Audio-Visual Database of Emotional Speech and Song (RAVDESS).
-> *PLOS ONE* 13(5): e0196391. https://doi.org/10.1371/journal.pone.0196391
-> License: CC BY-NC-SA 4.0
+> Scripted EMOtional Speech Repository for Urdu.
+> 27,640 utterances, 24 native speakers, 8 emotions.
+> https://link.springer.com/article/10.1007/s10579-022-09610-7
+
+**RAVDESS** (Phase 1 baseline, no longer used):
+
+> Livingstone SR, Russo FA (2018). PLOS ONE 13(5): e0196391.
+> https://doi.org/10.1371/journal.pone.0196391 — CC BY-NC-SA 4.0
