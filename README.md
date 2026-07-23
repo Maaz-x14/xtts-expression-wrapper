@@ -198,9 +198,37 @@ Phase 3 (planned)
   ⬜ REST API wrapper (FastAPI, Auralis async backend)
   ⬜ Integration with M2M100 transliteration pipeline
        User Speech → STT → Urdu Text → M2M100 → XTTS TTS → Audio
+
+    
 ```
 
 ---
+
+## TODO — Auralis checkpoint conversion (deferred)
+
+Status: NOT started. Deferred until GPU test (Phase 2.5) confirms whether current
+XTTS conditioning-based emotion transfer is viable, or Phase 3 (real emotion-conditioned
+fine-tuning) is needed instead.
+
+Auralis can't load `Agri-TTS/model.pth` as-is — it's a Coqui *trainer* checkpoint
+(raw state dict + trainer config.json), not the safetensors + HF-config format Auralis expects.
+
+If revisited, conversion requires:
+
+1. Read Auralis's model loader source to confirm exact expected config schema
+   (hidden_size, vocab_size, num_layers, etc. — likely different key names than
+   Coqui's trainer config.json).
+2. `torch.load('Agri-TTS/model.pth')` → extract state dict → remap/rename any
+   keys that differ between Coqui's XTTS module naming and Auralis's expected naming
+   (if any — needs checking, don't assume 1:1).
+3. `safetensors.torch.save_file()` the remapped state dict.
+4. Hand-write an HF-style config.json with the right fields translated from
+   Coqui's config.json (gpt_cond_len, gpt_layers, etc. → whatever Auralis calls them).
+5. Test load in Auralis, verify inference actually runs before assuming conversion succeeded.
+
+Reason to do this: only if Auralis provides a concrete capability current Coqui TTS
+setup lacks (e.g. proven better serving perf under real concurrent load). NOT for
+emotion quality — Auralis doesn't change conditioning-latent mechanism or ceiling.
 
 ## Dataset Credits
 
