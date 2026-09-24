@@ -1,20 +1,14 @@
 """
-Expressive Urdu TTS — XTTS v2 fine-tune + Auralis backend
+Expressive TTS — XTTS v2, dual-model / dual-language testing harness.
 
-Model    : Agri-TTS/ (local fine-tuned checkpoint)
-Language : Urdu
-Backend  : Auralis (latent-cached conditioning)
+Usage:
+    python main.py "<happy>Hello there</happy>" --model base --language english
+    python main.py "<happy>السلام علیکم</happy>" --model finetuned --language urdu
 
 Environment:
-    XTTS_MODEL_DIR   path to checkpoint dir (default: ./Agri-TTS)
+    XTTS_MODEL_DIR   override path to the fine-tuned checkpoint dir (default: ./Agri-TTS)
 
-Usage examples (Urdu):
-    python main.py "<happy>السلام علیکم، آپ کیسے ہیں؟</happy>"
-    python main.py "<sad>مجھے آپ کی یاد آتی ہے <pause=500ms> بہت زیادہ۔</sad>"
-    python main.py "<angry>یہ بالکل <pause=300ms> ناقابل قبول ہے!</angry>"
-    python main.py "<neutral>براہ کرم <slow>آہستہ آہستہ</slow> بولیں۔</neutral>"
-
-Output: output/
+Output: output/<language>/
 """
 
 import argparse
@@ -24,26 +18,22 @@ from src.wrapper import ExpressionWrapper
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Expressive Urdu TTS — XTTS v2 fine-tune + Auralis.",
+        description="Expressive TTS — XTTS v2, base vs fine-tuned, English vs Urdu.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument(
-        "input",
-        type=str,
-        help='Tagged input. Example: "<happy>السلام علیکم</happy>"',
-    )
-    parser.add_argument(
-        "--output",
-        type=str,
-        default="output.wav",
-        help="Output filename inside output/ (default: output.wav)",
-    )
+    parser.add_argument("input", type=str, help='Tagged input. Example: "<happy>Hello</happy>"')
+    parser.add_argument("--model", choices=["base", "finetuned"], default="finetuned",
+                         help="Which checkpoint to load (default: finetuned)")
+    parser.add_argument("--language", choices=["english", "urdu"], default="urdu",
+                         help="Which reference-clip set + XTTS language code to use (default: urdu)")
+    parser.add_argument("--output", type=str, default="output.wav",
+                         help="Output filename inside output/<language>/ (default: output.wav)")
 
     args = parser.parse_args()
 
     try:
-        wrapper = ExpressionWrapper()
+        wrapper = ExpressionWrapper(model=args.model, language=args.language)
         output_path = wrapper.synthesize(args.input, args.output)
         print(f"\n[DONE] Audio saved: {output_path}")
     except FileNotFoundError as e:

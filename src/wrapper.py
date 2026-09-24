@@ -1,16 +1,18 @@
 """
-ExpressionWrapper — Urdu XTTS v2 fine-tune, Coqui TTS backend with latent caching.
+ExpressionWrapper — XTTS v2, Coqui TTS backend with latent caching.
 
-Auralis dropped — incompatible with Coqui trainer checkpoint format (needs safetensors
-+ HF-style config.json). Coqui TTS 0.22.0 loads the checkpoint natively.
+One instance = one model (base|finetuned) + one language (english|urdu), fixed
+at construction — matches how you're running the dual-model comparison.
+Testing phase only — Auralis not used. Base loads via Coqui's TTS.api
+(auto-download from Coqui/HF); fine-tuned loads from a local checkpoint dir.
+Both converge to a raw Xtts instance on self.model, so every downstream call
+(get_conditioning_latents, inference) is identical regardless of which loaded.
 
-Latent caching: tts_model.get_conditioning_latents() is called once per emotion at
-startup. (gpt_cond_latent, speaker_embedding) tensors are stored in self._cache.
-Synthesis calls inference() directly with precomputed tensors — zero re-encoding
-per request.E
+Latent caching: get_conditioning_latents() called once per emotion at startup for
+the selected language. (gpt_cond_latent, speaker_embedding) cached in self._cache.
 
-Text chunking: handled manually — split on sentence boundaries before passing to
-inference(), since XTTS GPT context is ~250 chars.
+Text chunking: manual, sentence-boundary split before inference() — XTTS GPT
+context is ~250 chars.
 """
 
 import os
@@ -23,45 +25,69 @@ from pathlib import Path
 
 os.environ["COQUI_TOS_AGREED"] = "1"
 
-from TTS.api import TTS
 from TTS.tts.configs.xtts_config import XttsConfig
 from TTS.tts.models.xtts import Xtts
+from TTS.tts.layers.xtts.tokenizer import VoiceBpeTokenizer, basic_cleaners
 
 from src.tag_parser import parse_input
 from src.reference_map import get_reference_path, verify_all_clips, ALL_BASE_EMOTIONS
 
 # ---------------------------------------------------------------------------
-# Config
+# Monkeypatch: XTTS's tokenizer (TTS/tts/layers/xtts/tokenizer.py) hardcodes a
+# language allowlist in preprocess_text() that raises NotImplementedError for
+# any language outside {ar, cs, de, en, es, fr, hu, it, nl, pl, pt, ru, tr,
+# zh, ko, ja, hi}. Urdu ('ur') isn't in that list, even though this fine-tuned
+# checkpoint was explicitly trained on Urdu. Patched here — not in
+# site-packages — so it survives reinstalls/upgrades.
+#
+# basic_cleaners (lowercase + whitespace collapse, no transliteration) mirrors
+# exactly what Coqui's own maintainers do for 'hi' (Hindi) — same "not yet
+# implemented, use the neutral fallback" pattern. multilingual_cleaners was
+# deliberately avoided: it calls expand_numbers_multilingual() -> num2words(),
+# and num2words' Urdu support is unverified — not worth risking a second,
+# harder-to-diagnose failure mid-pipeline.
 # ---------------------------------------------------------------------------
-MODEL_DIR   = Path(os.environ.get("XTTS_MODEL_DIR", "Agri-TTS"))
-OUTPUT_DIR  = Path(__file__).parent.parent / "output"
-SAMPLE_RATE = 24000
-LANGUAGE    = "ur"
+_original_preprocess_text = VoiceBpeTokenizer.preprocess_text
 
-# XTTS GPT context limit — split text segments longer than this
+
+def _patched_preprocess_text(self, txt, lang):
+    if lang == "ur":
+        return basic_cleaners(txt)
+    return _original_preprocess_text(self, txt, lang)
+
+
+VoiceBpeTokenizer.preprocess_text = _patched_preprocess_text
+
+FINETUNED_MODEL_DIR = Path(os.environ.get("XTTS_MODEL_DIR", Path(__file__).parent.parent / "Agri-TTS"))
+OUTPUT_DIR_ROOT      = Path(__file__).parent.parent / "output"
+SAMPLE_RATE          = 24000
+
+MODEL_KEYS     = {"base", "finetuned"}
+LANGUAGE_CODES = {"english": "en", "urdu": "ur"}
 CHUNK_CHAR_LIMIT = 200
 
 
 class ExpressionWrapper:
-    """
-    Coqui XTTS v2 fine-tune wrapper with manual latent caching.
-
-    Startup: loads model, computes (gpt_cond_latent, speaker_embedding) for
-             every emotion that has a ref.wav, stores in self._cache.
-    Synthesis: calls tts_model.inference() directly with cached tensors.
-               No reference audio re-encoding at request time.
-    """
-
     def __init__(
         self,
-        model_dir: Path = MODEL_DIR,
+        model: str = "finetuned",
+        language: str = "urdu",
         temperature: float = 0.75,
         top_p: float = 0.85,
         top_k: int = 50,
         repetition_penalty: float = 5.0,
         length_penalty: float = 1.0,
     ):
-        self.model_dir          = Path(model_dir)
+        if model not in MODEL_KEYS:
+            raise ValueError(f"Unsupported model '{model}'. Use: {sorted(MODEL_KEYS)}")
+        if language not in LANGUAGE_CODES:
+            raise ValueError(f"Unsupported language '{language}'. Use: {sorted(LANGUAGE_CODES)}")
+
+        self.model_key = model
+        self.model_dir = FINETUNED_MODEL_DIR if model == "finetuned" else None
+        self.language  = language
+        self.lang_code = LANGUAGE_CODES[language]
+
         self.temperature        = temperature
         self.top_p              = top_p
         self.top_k              = top_k
@@ -72,23 +98,32 @@ class ExpressionWrapper:
         self._check_clips()
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"[WRAPPER] Model    : {self.model_key}")
+        print(f"[WRAPPER] Language : {self.language} ({self.lang_code})")
         print(f"[WRAPPER] Device   : {self.device}")
-        print(f"[WRAPPER] Model    : {self.model_dir}")
-        print(f"[WRAPPER] Loading XTTS v2 fine-tune...")
 
-        config = XttsConfig()
-        config.load_json(str(self.model_dir / "config.json"))
-        self.model = Xtts.init_from_config(config)
-        self.model.load_checkpoint(
-            config,
-            checkpoint_dir=str(self.model_dir),   # <-- add this line
-            checkpoint_path=str(self.model_dir / "model.pth"),
-            vocab_path=str(self.model_dir / "vocab.json"),
-            eval=True,
-        )
-        self.model.to(self.device)
+        if self.model_key == "base":
+            print("[WRAPPER] Loading stock XTTS v2 (auto-download on first run)...")
+            from TTS.api import TTS as CoquiTTS
+            tts_api = CoquiTTS(model_name="tts_models/multilingual/multi-dataset/xtts_v2")
+            self.model = tts_api.synthesizer.tts_model
+            self.model.to(self.device)
+        else:
+            print(f"[WRAPPER] Loading fine-tuned checkpoint ({self.model_dir})...")
+            config = XttsConfig()
+            config.load_json(str(self.model_dir / "config.json"))
+            self.model = Xtts.init_from_config(config)
+            self.model.load_checkpoint(
+                config,
+                checkpoint_dir=str(self.model_dir),
+                checkpoint_path=str(self.model_dir / "model.pth"),
+                vocab_path=str(self.model_dir / "vocab.json"),
+                eval=True,
+            )
+            self.model.to(self.device)
 
-        OUTPUT_DIR.mkdir(exist_ok=True)
+        self.output_dir = OUTPUT_DIR_ROOT / self.language
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
         print("[WRAPPER] Building latent cache...")
         self._cache: dict[str, tuple] = {}
@@ -100,45 +135,36 @@ class ExpressionWrapper:
     # ------------------------------------------------------------------
 
     def _validate_checkpoint(self):
+        """Only applies to the local fine-tuned checkpoint — base auto-downloads."""
+        if self.model_key != "finetuned":
+            return
         required = ["config.json", "model.pth", "vocab.json"]
         missing = [f for f in required if not (self.model_dir / f).exists()]
         if missing:
             raise FileNotFoundError(
                 f"Missing in {self.model_dir}: {missing}\n"
-                f"Set XTTS_MODEL_DIR env var to point at Agri-TTS/"
+                f"Set XTTS_MODEL_DIR or place checkpoint in {FINETUNED_MODEL_DIR}/"
             )
 
     def _check_clips(self):
-        missing = [e for e, ok in verify_all_clips().items() if not ok]
+        missing = [e for e, ok in verify_all_clips(self.language).items() if not ok]
         if missing:
-            print(f"[WRAPPER] WARNING — no ref.wav for: {missing}")
-            print(f"[WRAPPER] Run: python scripts/select_clips.py --semour-dir SEMOUR+_data --build --actor 5")
+            print(f"[WRAPPER] WARNING — no ref.wav for ({self.language}): {missing}")
+            print(f"[WRAPPER] Run: python scripts/build_reference_clips.py --language {self.language}")
 
     # ------------------------------------------------------------------
     # Latent cache
     # ------------------------------------------------------------------
 
     def _build_cache(self):
-        """
-        Compute (gpt_cond_latent, speaker_embedding) for each emotion's ref.wav.
-        get_conditioning_latents() concatenates audio internally for gpt_cond_latent
-        and averages speaker_embedding — same mechanism as multi-clip XTTS conditioning.
-        """
         for emotion in sorted(ALL_BASE_EMOTIONS):
             try:
-                ref_path = get_reference_path(emotion)
+                ref_path = get_reference_path(emotion, self.language)
             except FileNotFoundError:
                 continue
 
             t0 = time.time()
             try:
-                # gpt_cond_latent, speaker_embedding = self.model.get_conditioning_latents(
-                #     audio_path=[str(ref_path)],
-                #     gpt_cond_len=self.model.config.gpt_cond_len,
-                #     gpt_cond_chunk_len=self.model.config.gpt_cond_chunk_len,
-                #     max_ref_length=self.model.config.max_ref_len,
-                #     sound_norm_refs=self.model.config.sound_norm_refs,
-                # )
                 gpt_cond_latent, speaker_embedding = self.model.get_conditioning_latents(
                     audio_path=[str(ref_path)],
                     gpt_cond_len=self.model.config.gpt_cond_len,
@@ -164,14 +190,8 @@ class ExpressionWrapper:
     # ------------------------------------------------------------------
 
     def _chunk_text(self, text: str) -> list[str]:
-        """
-        Split text at sentence boundaries to stay within XTTS's GPT context limit.
-        Tries punctuation splits first, falls back to hard char-limit splits.
-        """
         if len(text) <= CHUNK_CHAR_LIMIT:
             return [text]
-
-        # Split on Urdu/Arabic sentence-ending punctuation + common Latin stops
         parts = re.split(r'(?<=[۔؟!.?])\s+', text)
         chunks, current = [], ""
         for part in parts:
@@ -180,7 +200,6 @@ class ExpressionWrapper:
             else:
                 if current:
                     chunks.append(current)
-                # If single part is still too long, hard-split
                 while len(part) > CHUNK_CHAR_LIMIT:
                     chunks.append(part[:CHUNK_CHAR_LIMIT])
                     part = part[CHUNK_CHAR_LIMIT:]
@@ -197,13 +216,12 @@ class ExpressionWrapper:
         return np.zeros(int(SAMPLE_RATE * duration_ms / 1000), dtype=np.float32)
 
     def _synth_text(self, text: str, gpt_cond_latent, speaker_embedding) -> np.ndarray:
-        """Synthesize one text chunk using precomputed latents."""
         chunks = self._chunk_text(text)
         parts = []
         for chunk in chunks:
             out = self.model.inference(
                 text=chunk,
-                language=LANGUAGE,
+                language=self.lang_code,
                 gpt_cond_latent=gpt_cond_latent,
                 speaker_embedding=speaker_embedding,
                 temperature=self.temperature,
@@ -211,7 +229,7 @@ class ExpressionWrapper:
                 top_k=self.top_k,
                 repetition_penalty=self.repetition_penalty,
                 length_penalty=self.length_penalty,
-                enable_text_splitting=False,  # we handle splitting ourselves
+                enable_text_splitting=False,
             )
             audio = torch.tensor(out["wav"]).numpy().astype(np.float32)
             parts.append(audio)
@@ -223,23 +241,9 @@ class ExpressionWrapper:
         import librosa
         return librosa.effects.time_stretch(audio, rate=speed)
 
-    def synthesize(
-        self,
-        tagged_input: str,
-        output_filename: str = "output.wav",
-    ) -> Path:
-        """
-        Parse tagged input and synthesize to wav.
-
-        Args:
-            tagged_input   : e.g. "<happy>السلام علیکم <pause=300ms> آپ کیسے ہیں؟</happy>"
-            output_filename: filename inside output/
-
-        Returns:
-            Path to generated wav.
-        """
+    def synthesize(self, tagged_input: str, output_filename: str = "output.wav") -> Path:
         emotion, segments = parse_input(tagged_input)
-        output_path = OUTPUT_DIR / output_filename
+        output_path = self.output_dir / output_filename
         gpt_cond_latent, speaker_embedding = self._get_latents(emotion)
 
         print(f"[WRAPPER] Emotion  : {emotion}")
@@ -250,7 +254,6 @@ class ExpressionWrapper:
             if seg["type"] == "pause":
                 print(f"  [{i+1}] pause {seg['duration_ms']}ms")
                 parts.append(self._make_silence(seg["duration_ms"]))
-
             elif seg["type"] == "text":
                 speed = seg["speed"]
                 print(f"  [{i+1}] text  speed={speed}  \"{seg['content']}\"")
