@@ -23,7 +23,9 @@ pip install torch==2.4.1 torchaudio==2.4.1 \
     --quiet
 
 echo "[SETUP] Pinning transformers (BeamSearchScorer removed in 4.41+)..."
-pip install "transformers==4.40.3" --quiet
+source venv/bin/activate
+
+pip install "transformers==4.40.2" --quiet
 
 echo "[SETUP] Installing project requirements..."
 pip install -r requirements.txt --quiet
@@ -31,4 +33,4 @@ pip install -r requirements.txt --quiet
 echo ""
 echo "[DONE] Setup complete."
 echo "[DONE] To activate: source venv/bin/activate"
-echo "[DONE] To download RAVDESS clips: python scripts/download_ravdess.py"
+echo "[DONE] To download RAVDESS clips: python scripts/build_reference_clips.py --language english"

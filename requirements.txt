@@ -1,18 +1,22 @@
-# Core TTS backend — Auralis replaces TTS.api (Coqui high-level API)
-auralis>=0.1.0
+# Core TTS backend — Coqui TTS (loads Agri-TTS fine-tune + stock XTTS-v2 base checkpoint natively)
+TTS==0.22.0
 
 # Audio processing
 soundfile>=0.12.0
 librosa>=0.10.0
 numpy==1.26.4
 
-# ML / torch — match your local CUDA version if on GPU
-torch>=2.1.0
-torchaudio>=2.1.0
+# ML / torch — CPU by default, swap index-url for CUDA if on GPU (see setup.sh)
+torch==2.4.1
+torchaudio==2.4.1
 
-# Transformers (needed by Auralis internals)
-transformers>=4.40.0
-tokenizers>=0.19.0
+# Transformers — pinned per setup.sh (BeamSearchScorer removed in 4.41+, breaks XTTS)
+transformers==4.45.0
+tokenizers==0.20.3
 
-# Utilities
+# Utilities — used by scripts/build_reference_clips.py (RAVDESS download)
 requests>=2.31.0
+
+# Server — server/server.py (single-model HTTP wrapper, replaces per-call main.py reloads)
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
